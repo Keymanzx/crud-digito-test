@@ -12,7 +12,7 @@ RUN apk update && apk add --no-cache git
 WORKDIR /app
 
 # Copy go mod and sum files 
-COPY src/go.mod src/go.sum ./
+COPY go.mod go.sum ./
 
 # Download all dependencies. Dependencies will be cached if the go.mod and the go.sum files are not changed 
 RUN go mod download 
@@ -34,17 +34,11 @@ RUN apk --no-cache add ca-certificates
 RUN apk add --no-cache tzdata
 ENV TZ="Asia/Bangkok"
 
-WORKDIR /opt/gofiber-app
+WORKDIR /opt/go-app
 
 # Copy the Pre-built binary file from the previous stage. Observe we also copied the .env file
 COPY --from=builder /app/main .
 COPY --from=builder /app/.env . 
-
-# Copy the asset folder from your project into the container
-# COPY ./asset ./asset
-
-# Coppy the certificates from the previous stage
-# COPY src/certificate ./certificate
 
 # Expose port 8000
 EXPOSE 8000
