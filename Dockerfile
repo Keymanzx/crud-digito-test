@@ -1,77 +1,53 @@
-# syntax=docker/dockerfile:1
+# Start from golang base image
+FROM golang:1.20-alpine as builder
 
-# Comments are provided throughout this file to help you get started.
-# If you need more help, visit the Dockerfile reference guide at
-# https://docs.docker.com/go/dockerfile-reference/
+# Add Maintainer info
+LABEL maintainer="key@gmail.com>"
 
-################################################################################
-# Create a stage for building the application.
-ARG GO_VERSION=1.20
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION} AS build
-WORKDIR /src
+# Install git.
+# Git is required for fetching the dependencies.
+RUN apk update && apk add --no-cache git 
 
-# Download dependencies as a separate step to take advantage of Docker's caching.
-# Leverage a cache mount to /go/pkg/mod/ to speed up subsequent builds.
-# Leverage bind mounts to go.sum and go.mod to avoid having to copy them into
-# the container.
-RUN --mount=type=cache,target=/go/pkg/mod/ \
-    --mount=type=bind,source=go.sum,target=go.sum \
-    --mount=type=bind,source=go.mod,target=go.mod \
-    go mod download -x
+# Set the current working directory inside the container 
+WORKDIR /app
 
-# This is the architecture you’re building for, which is passed in by the builder.
-# Placing it here allows the previous steps to be cached across architectures.
-ARG TARGETARCH
+# Copy go mod and sum files 
+COPY src/go.mod src/go.sum ./
 
-# Build the application.
-# Leverage a cache mount to /go/pkg/mod/ to speed up subsequent builds.
-# Leverage a bind mount to the current directory to avoid having to copy the
-# source code into the container.
-RUN --mount=type=cache,target=/go/pkg/mod/ \
-    --mount=type=bind,target=. \
-    CGO_ENABLED=0 GOARCH=$TARGETARCH go build -o /bin/server .
+# Download all dependencies. Dependencies will be cached if the go.mod and the go.sum files are not changed 
+RUN go mod download 
 
-################################################################################
-# Create a new stage for running the application that contains the minimal
-# runtime dependencies for the application. This often uses a different base
-# image from the build stage where the necessary files are copied from the build
-# stage.
-#
-# The example below uses the alpine image as the foundation for running the app.
-# By specifying the "latest" tag, it will also use whatever happens to be the
-# most recent version of that image when you build your Dockerfile. If
-# reproducability is important, consider using a versioned tag
-# (e.g., alpine:3.17.2) or SHA (e.g., alpine@sha256:c41ab5c992deb4fe7e5da09f67a8804a46bd0592bfdf0b1847dde0e0889d2bff).
-FROM alpine:latest AS final
+# Copy the source from the current directory to the working Directory inside the container 
+COPY ./src .
 
-# Install any runtime dependencies that are needed to run your application.
-# Leverage a cache mount to /var/cache/apk/ to speed up subsequent builds.
-RUN --mount=type=cache,target=/var/cache/apk \
-    apk --update add \
-        ca-certificates \
-        tzdata \
-        && \
-        update-ca-certificates
+# Copy the asset folder from your project into the container
+# COPY ./asset ./asset
 
-# Create a non-privileged user that the app will run under.
-# See https://docs.docker.com/go/dockerfile-user-best-practices/
-ARG UID=10001
-RUN adduser \
-    --disabled-password \
-    --gecos "" \
-    --home "/nonexistent" \
-    --shell "/sbin/nologin" \
-    --no-create-home \
-    --uid "${UID}" \
-    appuser
-USER appuser
+# Build the Go app
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 
-# Copy the executable from the "build" stage.
-COPY --from=build /bin/server /bin/
-# COPY --from=build /app/.env .
+# Start a new stage from scratch
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
 
-# Expose the port that the application listens on.
+# Set time zone 
+RUN apk add --no-cache tzdata
+ENV TZ="Asia/Bangkok"
+
+WORKDIR /opt/gofiber-app
+
+# Copy the Pre-built binary file from the previous stage. Observe we also copied the .env file
+COPY --from=builder /app/main .
+COPY --from=builder /app/.env . 
+
+# Copy the asset folder from your project into the container
+# COPY ./asset ./asset
+
+# Coppy the certificates from the previous stage
+# COPY src/certificate ./certificate
+
+# Expose port 8000
 EXPOSE 8000
 
-# What the container should run when it is started.
-ENTRYPOINT [ "/bin/server" ]
+# Command to run the executable
+CMD ["./main"]
